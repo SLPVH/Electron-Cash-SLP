@@ -97,6 +97,11 @@ class Software_KeyStore(KeyStore):
     def may_have_password(self):
         return not self.is_watching_only()
 
+    def sign_digest(self, sequence, message, password):
+        privkey, compressed = self.get_private_key(sequence, password)
+        key = regenerate_key(privkey)
+        return key.sign_digest(message)
+
     def sign_message(self, sequence, message, password):
         privkey, compressed = self.get_private_key(sequence, password)
         key = regenerate_key(privkey)

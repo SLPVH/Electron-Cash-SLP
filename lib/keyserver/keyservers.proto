@@ -1,0 +1,6 @@
+syntax = "proto3";
+package models;
+
+message Keyservers {
+    repeated string urls = 1;
+}
