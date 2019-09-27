@@ -1046,8 +1046,8 @@ class Abstract_Wallet(PrintError):
 
     def get_spendable_coins(self, domain, config, isInvoice = False):
         confirmed_only = config.get('confirmed_only', DEFAULT_CONFIRMED_ONLY)
-        if (isInvoice):
-            confirmed_only = True
+        # if (isInvoice):
+        #     confirmed_only = True
         return self.get_utxos(domain=domain, exclude_frozen=True, mature=True, confirmed_only=confirmed_only)
 
     def get_slp_spendable_coins(self, slpTokenId, domain, config, isInvoice = False):

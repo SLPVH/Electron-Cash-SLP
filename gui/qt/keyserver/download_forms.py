@@ -34,7 +34,7 @@ def construct_download_forms(parent, extracted):
                 forms.append(DIconForm(entry.entry_data))
             elif entry.kind == "html":
                 html = entry.entry_data.decode('utf8')
-                forms.append(DIconForm(html))
+                forms.append(DHtmlForm(html))
             else:
                 forms.append(DUnknownForm(entry.kind, entry.entry_data))
         except Exception as e:
@@ -350,10 +350,10 @@ class DIconForm(QWidget):
 
         self.setLayout(logo_grid)
 
-class DIconForm(QWidget):
+class DHtmlForm(QWidget):
     name = "HTML"
     def __init__(self, html, *args, **kwargs):
-        super(DIconForm, self).__init__(*args, **kwargs)
+        super(DHtmlForm, self).__init__(*args, **kwargs)
         logo_grid = QGridLayout()
 
         web = QWebEngineView()
