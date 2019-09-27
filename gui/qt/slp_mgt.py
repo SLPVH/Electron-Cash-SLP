@@ -107,6 +107,7 @@ class SlpMgt(MyTreeWidget):
                 menu.addAction(_("Remove this token"), lambda: self.parent.delete_slp_token(keys))
                 if self.currentItem():
                     menu.addAction(_("View Token Details"), lambda: self.onViewTokenDetails())
+                menu.addAction(_("View Token Metadata"), lambda: self.onViewTokenMetadata())
                 menu.addSeparator()
                 menu.addAction(_("Burn Tool"), lambda: self.onBurnDialog())
             menu.addSeparator()
@@ -117,11 +118,31 @@ class SlpMgt(MyTreeWidget):
         run_hook('create_contact_menu', menu, selected)
         menu.exec_(self.viewport().mapToGlobal(position))
 
-
     def onViewTokenDetails(self):
         current = self.currentItem()
         if current:
             SlpAddTokenDialog(self.parent, token_id_hex = current.data(0, Qt.UserRole), token_name=current.text(1))
+
+    def onViewTokenMetadata(self):
+        from electroncash.slp import SlpMessage, SlpUnsupportedSlpTokenType, SlpInvalidOutputMessage
+
+        current = self.currentItem()
+        token_id_hex = current.data(0, Qt.UserRole)
+        tx = self.parent.wallet.transactions[token_id_hex]
+        if current:
+            try:
+                slpMsg = SlpMessage.parseSlpOutputScript(tx.outputs()[0][1])
+            except SlpUnsupportedSlpTokenType as e:
+                return self.fail_genesis_info(_("Unsupported SLP token version/type - %r.")%(e.args[0],))
+        addr = slpMsg.op_return_fields["token_doc_url"].decode()
+        try:
+            index = self.parent.tabs.indexOf(self.parent.keyserver_tab)
+        except:
+            print("TODO")
+        self.parent.tabs.setCurrentIndex(index)
+        self.parent.ks_addr_download_e.setText(addr)
+        self.parent.pick_address_download(picker=False)
+
 
     def onBurnDialog(self):
         current = self.currentItem()

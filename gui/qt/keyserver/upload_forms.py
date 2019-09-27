@@ -234,3 +234,28 @@ class UIconForm(UKeyserverForm):
 
     def construct_entry(self):
         return icon_entry(self.img_data)
+
+class UHTMLForm(UKeyserverForm):
+    def __init__(self, *args, **kwargs):
+        super(UHTMLForm, self).__init__(*args, **kwargs)
+        plain_text_grid = QGridLayout()
+        msg = _('HTML to be uploaded.')
+        description_label = HelpLabel(_('&HTML'), msg)
+        plain_text_grid.addWidget(description_label, 0, 0)
+        self.upload_html_e = QTextEdit()
+        description_label.setBuddy(self.upload_html_e)
+        plain_text_grid.addWidget(self.upload_html_e, 0, 1, 1, -1)
+
+        self.setLayout(plain_text_grid)
+
+        self.upload_html_e.textChanged.connect(self.inputs_changed.emit)
+
+    def is_full(self):
+        return bool(self.upload_html_e.toPlainText())
+
+    def clear(self):
+        self.upload_html_e.clear()
+
+    def construct_entry(self):
+        data = self.upload_html_e.toPlainText()
+        return plain_text_entry(data)

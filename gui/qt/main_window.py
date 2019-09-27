@@ -3054,9 +3054,38 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         messages += "Messages:\n" + "\n".join([entry.entry_data.decode() for entry in entries if entry.kind == "text_utf8"])
         self.show_message(messages)
 
+    def pick_address_download(self, picker=True):
+        import requests
+        from google.protobuf.json_format import MessageToJson 
+        from electroncash.keyserver.addressmetadata_pb2 import Entry, Payload, AddressMetadata
+        from .keyserver.download_forms import construct_download_forms
+        from .keyserver.address_list import pick_ks_address
+                
+        if picker:
+            addr = pick_ks_address(self, True)
+            if addr:
+                self.ks_addr_download_e.setText(addr)
+            else:
+                return
+        else:
+            addr = self.ks_addr_download_e.text()
+    
+        self.d_ks_forms.clear()
+        extracted, errors = self.ks_handler.uniform_aggregate(addr)
+        if extracted is not None:
+            forms = construct_download_forms(self, extracted)
+            for form in forms:
+                self.d_ks_forms.addTab(form, form.name)
+            self.download_groupbox.resize()
+        else:
+            str_error = ""
+            for url, err in errors:
+                str_error += url + ": " + str(err) + "\n"
+            self.show_error("Failed to retrieve metadata", detail_text=str_error)
+
     def create_keyserver_tab(self):
         from PyQt5.QtCore import QDateTime
-        from .keyserver.upload_forms import UPlainTextForm, UTelegramForm, UKeyserverURLForm, UVCardForm, UPubkeyForm, UIconForm
+        from .keyserver.upload_forms import UPlainTextForm, UTelegramForm, UKeyserverURLForm, UVCardForm, UPubkeyForm, UIconForm, UHTMLForm
         from .keyserver.tab_bar import TabWidget
         from .keyserver.address_list import pick_ks_address
         from electroncash.keyserver.handler import KSHandler
@@ -3110,7 +3139,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.ks_combobox_upload.addItem("vCard")
         self.ks_combobox_upload.addItem("PubKey")
         self.ks_combobox_upload.addItem("Icon")
-        self.ks_combobox_upload.addItem("Markdown")
+        self.ks_combobox_upload.addItem("HTML")
         description_label.setBuddy(self.ks_combobox_upload)
         upload_grid.addWidget(self.ks_combobox_upload, 3, 1, 1, 1)
         add_new_entry = QPushButton(_("&Add"))
@@ -3160,9 +3189,9 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
                 form.inputs_changed.connect(on_text_changed)
                 self.u_ks_forms.addTab(form, "Icon")
             elif index == 6:
-                form = UMarkdownForm()
+                form = UHTMLForm()
                 form.inputs_changed.connect(on_text_changed)
-                self.u_ks_forms.addTab(form, "Markdown")
+                self.u_ks_forms.addTab(form, "HTML")
 
             new_index = self.u_ks_forms.count() - 1
             self.u_ks_forms.setCurrentIndex(new_index)
@@ -3193,33 +3222,11 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         upload_groupbox.setContentLayout(upload_grid)
 
         # Download
-        download_groupbox = CollapsibleBox("Download")
+        self.download_groupbox = CollapsibleBox("Download")
 
         download_grid = QGridLayout()
         download_grid.setSpacing(8)
         download_grid.setColumnStretch(3, 1)
-
-        def pick_address_download():
-            import requests
-            from google.protobuf.json_format import MessageToJson 
-            from electroncash.keyserver.addressmetadata_pb2 import Entry, Payload, AddressMetadata
-            from .keyserver.download_forms import construct_download_forms
-
-            addr = pick_ks_address(self, True)
-            if addr:
-                self.ks_addr_download_e.setText(addr)
-                self.d_ks_forms.clear()
-                extracted, errors = self.ks_handler.uniform_aggregate(addr)
-                if extracted is not None:
-                    forms = construct_download_forms(self, extracted)
-                    for form in forms:
-                        self.d_ks_forms.addTab(form, form.name)
-                    download_groupbox.resize()
-                else:
-                    str_error = ""
-                    for url, err in errors:
-                        str_error += url + ": " + str(err) + "\n"
-                    self.show_error("Failed to retrieve metadata", detail_text=str_error)
 
         msg = _('Address to downloaded from.  Use the tool button on the right to pick a wallet address.')
         description_label = HelpLabel(_('&Address'), msg)
@@ -3227,14 +3234,14 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.ks_addr_download_e = ButtonsLineEdit()
         self.ks_addr_download_e.setReadOnly(True)
         self.ks_addr_download_e.setPlaceholderText(_("Specify a wallet address"))
-        self.ks_addr_download_e.addButton(":icons/tab_addresses.png", on_click=pick_address_download, tooltip=_("Pick an address from your wallet"))
+        self.ks_addr_download_e.addButton(":icons/tab_addresses.png", on_click=self.pick_address_download, tooltip=_("Pick an address from your wallet"))
         description_label.setBuddy(self.ks_addr_download_e)
         download_grid.addWidget(self.ks_addr_download_e, 1, 1, 1, -1)
 
         self.d_ks_forms = TabWidget(self)
         download_grid.addWidget(self.d_ks_forms, 2, 0, 1, -1)
 
-        download_groupbox.setContentLayout(download_grid)
+        self.download_groupbox.setContentLayout(download_grid)
 
         # Tools
         tools_groupbox = CollapsibleBox("Tools")
@@ -3259,7 +3266,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         # Compose
         vbox0 = QVBoxLayout()
         vbox0.addWidget(upload_groupbox)
-        vbox0.addWidget(download_groupbox)
+        vbox0.addWidget(self.download_groupbox)
         vbox0.addWidget(tools_groupbox)
         hbox = QHBoxLayout()
         hbox.addLayout(vbox0)

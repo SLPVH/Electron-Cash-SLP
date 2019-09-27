@@ -46,3 +46,9 @@ def vcard_entry(card: dict):
 def icon_entry(logo: bytes):
     entry = Entry(kind="icon", headers=[], entry_data=logo)
     return entry
+
+def html_entry(html: str):
+    body = html.encode('utf8')
+    entry = Entry(kind="html", headers=[], entry_data=body)
+    return entry
+  

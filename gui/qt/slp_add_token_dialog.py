@@ -237,6 +237,9 @@ class SlpAddTokenDialog(QDialog, MessageBoxMixin):
         cursor.insertBlock()
         for k,n,e,f in fields:
             data = slpMsg.op_return_fields[k]
+            print(data)
+            print(k)
+            # print(k, n, e, f)
             if e == 'hex':
                 friendlystring = None
             else:
@@ -264,7 +267,8 @@ class SlpAddTokenDialog(QDialog, MessageBoxMixin):
                 f=None
             else:
                 showstr = repr(friendlystring)
-
+            # print(showstr)
+            # print(friendlystring)
             cursor.insertText(' '*(10 - len(n)) + n + ': ', f_fieldnames)
             if f == 'html':
                 enc_url  = html.escape(friendlystring)
