@@ -185,7 +185,7 @@ class KSAddressList(MyTreeWidget):
             addrs = [i.data(0, self.DataRoles.address)
                      for i in self.selectedItems()]
             if addrs and isinstance(addrs[0], Address):
-                text = addrs[0].to_full_ui_string()
+                text = addrs[0].to_full_string(fmt=Address.FMT_CASHADDR)
                 self.parent.app.clipboard().setText(text)
         else:
             super().keyPressEvent(event)
@@ -291,7 +291,7 @@ def pick_ks_address(parent, external=False) -> str:
             if text != "":
                 if Address.is_valid(text):
                     # TODO: Fix clunky way to add prefix
-                    addr = Address.from_string(text).to_full_ui_string()
+                    addr = Address.from_string(text).to_full_string(fmt=Address.FMT_CASHADDR)
                     ok.setEnabled(True)
                 else:
                     ok.setEnabled(False)
@@ -312,7 +312,7 @@ def pick_ks_address(parent, external=False) -> str:
     def on_item_changed(current, previous):
         nonlocal addr
         addr = current and current.data(0, l.DataRoles.address)
-        addr = addr.to_full_ui_string()
+        addr = addr.to_full_string(fmt=Address.FMT_CASHADDR)
         ok.setEnabled(addr is not None)
     l.currentItemChanged.connect(on_item_changed)
 
