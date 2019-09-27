@@ -72,13 +72,13 @@ class KSHandler:
 
                         if new_metadata == best.metadata:
                             if new_timestamp > best.metadata.payload.timestamp:
-                                best.confidence = 0
+                                best.confidence = 1
                                 best.url = url
                             else:
                                 best.confidence += 1
                         else:
                             best.metadata = new_metadata
-                            best.confidence = 0
+                            best.confidence = 1
                             best.url = url
 
             except Exception as e:
