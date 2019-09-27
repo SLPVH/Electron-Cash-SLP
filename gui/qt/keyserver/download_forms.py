@@ -1,5 +1,6 @@
 import base64
 from PyQt5.QtWidgets import *
+from PyQt5.QtWebEngineWidgets import *
 from ..util import *
 from electroncash.i18n import _
 from electroncash.keyserver.metadata_tools import *
@@ -31,6 +32,9 @@ def construct_download_forms(parent, extracted):
                 forms.append(DPubKeyForm(parent, entry.entry_data))
             elif entry.kind == "icon":
                 forms.append(DIconForm(entry.entry_data))
+            elif entry.kind == "html":
+                html = entry.entry_data.decode('utf8')
+                forms.append(DIconForm(html))
             else:
                 forms.append(DUnknownForm(entry.kind, entry.entry_data))
         except Exception as e:
@@ -343,5 +347,17 @@ class DIconForm(QWidget):
         self.preview_logo.setAlignment(Qt.AlignCenter)
         self.preview_logo.setPixmap(pixel_map)
         logo_grid.addWidget(self.preview_logo, 1, 1, 1, -1)
+
+        self.setLayout(logo_grid)
+
+class DIconForm(QWidget):
+    name = "HTML"
+    def __init__(self, html, *args, **kwargs):
+        super(DIconForm, self).__init__(*args, **kwargs)
+        logo_grid = QGridLayout()
+
+        web = QWebEngineView()
+        web.setHtml(html)
+        logo_grid.addWidget(web, 1, 1, 1, -1)
 
         self.setLayout(logo_grid)

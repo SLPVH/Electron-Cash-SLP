@@ -36,6 +36,7 @@ from collections import OrderedDict
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
+import PyQt5.QtWebEngineWidgets # Preemptive import required
 
 from electroncash import keystore, get_config
 from electroncash.address import Address, ScriptOutput
@@ -3234,7 +3235,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.ks_addr_download_e = ButtonsLineEdit()
         self.ks_addr_download_e.setReadOnly(True)
         self.ks_addr_download_e.setPlaceholderText(_("Specify a wallet address"))
-        self.ks_addr_download_e.addButton(":icons/tab_addresses.png", on_click=self.pick_address_download, tooltip=_("Pick an address from your wallet"))
+        self.ks_addr_download_e.addButton(":icons/tab_addresses.png", on_click= lambda: self.pick_address_download(picker=True), tooltip=_("Pick an address from your wallet"))
         description_label.setBuddy(self.ks_addr_download_e)
         download_grid.addWidget(self.ks_addr_download_e, 1, 1, 1, -1)
 

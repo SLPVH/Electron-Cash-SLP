@@ -258,4 +258,4 @@ class UHTMLForm(UKeyserverForm):
 
     def construct_entry(self):
         data = self.upload_html_e.toPlainText()
-        return plain_text_entry(data)
+        return html_entry(data)
