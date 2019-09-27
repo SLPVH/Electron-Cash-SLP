@@ -237,9 +237,7 @@ class SlpAddTokenDialog(QDialog, MessageBoxMixin):
         cursor.insertBlock()
         for k,n,e,f in fields:
             data = slpMsg.op_return_fields[k]
-            print(data)
-            print(k)
-            # print(k, n, e, f)
+
             if e == 'hex':
                 friendlystring = None
             else:
