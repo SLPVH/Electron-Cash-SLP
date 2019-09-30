@@ -124,11 +124,17 @@ class SlpMgt(MyTreeWidget):
             SlpAddTokenDialog(self.parent, token_id_hex = current.data(0, Qt.UserRole), token_name=current.text(1))
 
     def onViewTokenMetadata(self):
+        from electroncash.transaction import Transaction
         from electroncash.slp import SlpMessage, SlpUnsupportedSlpTokenType, SlpInvalidOutputMessage
 
         current = self.currentItem()
         token_id_hex = current.data(0, Qt.UserRole)
-        tx = self.parent.wallet.transactions[token_id_hex]
+        try:
+            tx = self.parent.wallet.transactions[token_id_hex]
+        except KeyError:
+            tx = self.parent.network.synchronous_get(('blockchain.transaction.get', [token_id_hex]), timeout=10.0)
+            tx = Transaction(tx)
+
         if current:
             try:
                 slpMsg = SlpMessage.parseSlpOutputScript(tx.outputs()[0][1])
