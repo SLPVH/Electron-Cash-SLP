@@ -15,7 +15,9 @@ Electron Cash - Lightweight Bitcoin Cash client
 
 
 
+For info about project:
 
+https://github.com/orgs/SLPVH/teams/george-bush-faked-the-moonlandings
 
 Getting started
 ===============
