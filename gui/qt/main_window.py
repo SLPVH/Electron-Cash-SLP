@@ -36,6 +36,7 @@ from collections import OrderedDict
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
+import PyQt5.QtWebEngineWidgets # Preemptive import required
 
 from electroncash import keystore, get_config
 from electroncash.address import Address, ScriptOutput
@@ -188,6 +189,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.contacts_tab = self.create_contacts_tab()
         self.slp_mgt_tab = self.create_slp_mgt_tab()
         self.converter_tab = self.create_converter_tab()
+        self.keyserver_tab = self.create_keyserver_tab()
         self.slp_history_tab = self.create_slp_history_tab()
         self.slp_token_id = None
         tabs.addTab(self.create_history_tab(), QIcon(":icons/tab_history.png"), _('History'))
@@ -209,6 +211,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         add_optional_tab(tabs, self.contacts_tab, QIcon(":icons/tab_contacts.png"), _("Con&tacts"), "contacts")
         add_optional_tab(tabs, self.converter_tab, QIcon(":icons/tab_converter.svg"), _("Address Converter"), "converter", True)
         add_optional_tab(tabs, self.console_tab, QIcon(":icons/tab_console.png"), _("Con&sole"), "console")
+        add_optional_tab(tabs, self.keyserver_tab, QIcon(":icons/tab_console.png"), _('&Keyserver'), "keyserver", True)
         if self.is_slp_wallet:
             add_optional_tab(tabs, self.slp_mgt_tab, QIcon(":icons/tab_slp_icon.png"), _("Tokens"), "tokens")
             add_optional_tab(tabs, self.slp_history_tab, QIcon(":icons/tab_slp_icon.png"), _("SLP History"), "slp_history", True)
@@ -712,6 +715,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         add_toggle_action(view_menu, self.contacts_tab)
         add_toggle_action(view_menu, self.converter_tab)
         add_toggle_action(view_menu, self.console_tab)
+        add_toggle_action(view_menu, self.keyserver_tab)
         if self.is_slp_wallet:
             add_toggle_action(view_menu, self.slp_mgt_tab)
             add_toggle_action(view_menu, self.slp_history_tab)
@@ -2680,6 +2684,15 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.payto_e.setText(_("please wait..."))
         return True
 
+    def prepare_for_payment_request_ks(self):
+        self.show_send_tab()
+        self.payto_e.is_pr = True
+        for e in [self.payto_e, self.amount_e, self.message_e]:
+            e.setFrozen(True)
+        self.max_button.setDisabled(True)
+        self.payto_e.setText(_("please wait..."))
+        return True
+
     def delete_invoice(self, key):
         self.invoices.remove(key)
         self.invoice_list.update()
@@ -3012,6 +3025,259 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         self.cashaddr_toggled_signal.connect(l.update)
         return self.create_list_tab(l)
 
+    @protected
+    def decrypt_w2w_msg(self, password: str):
+        import base64
+        from electroncash.keyserver.messaging_pb2 import Message, Payload
+        from electroncash.keyserver.w2w_messages import decrypt_entries
+        from electroncash.bitcoin import regenerate_key
+        from datetime import datetime
+        try:
+            raw_msg = base64.b64decode(self.w2w_cipher_text_e.toPlainText())
+        except Exception as err:
+            self.show_error("Failed to decode base64", detail_text=str(err))
+            return
+
+        def fetch_priv_from_pub(pubkey):
+            # TODO: Refactor crypto library to make this easier?
+            addr = Address.from_pubkey(pubkey)
+            index = self.wallet.get_address_index(addr)
+            pk, _ = self.wallet.keystore.get_private_key(index, password)
+            return regenerate_key(pk).privkey
+
+        try:
+            timestamp, entries = decrypt_entries(raw_msg, fetch_priv_from_pub)
+        except Exception as err:
+            self.show_error("Failed to decrypt entries", detail_text=str(err))
+            return
+
+        messages = "Timestamp: " + datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') + "\n"
+        messages += "Messages:\n" + "\n".join([entry.entry_data.decode() for entry in entries if entry.kind == "text_utf8"])
+        self.show_message(messages)
+
+    def pick_address_download(self, picker=True):
+        import requests
+        from google.protobuf.json_format import MessageToJson 
+        from electroncash.keyserver.addressmetadata_pb2 import Entry, Payload, AddressMetadata
+        from .keyserver.download_forms import construct_download_forms
+        from .keyserver.address_list import pick_ks_address
+                
+        if picker:
+            addr = pick_ks_address(self, True)
+            if addr:
+                self.ks_addr_download_e.setText(addr)
+            else:
+                return
+        else:
+            addr = self.ks_addr_download_e.text()
+    
+        self.d_ks_forms.clear()
+        extracted, errors = self.ks_handler.uniform_aggregate(addr)
+        if extracted is not None:
+            forms = construct_download_forms(self, extracted)
+            for form in forms:
+                self.d_ks_forms.addTab(form, form.name)
+            self.download_groupbox.resize()
+        else:
+            str_error = ""
+            for url, err in errors:
+                str_error += url + ": " + str(err) + "\n"
+            self.show_error("Failed to retrieve metadata", detail_text=str_error)
+
+    def create_keyserver_tab(self):
+        from PyQt5.QtCore import QDateTime
+        from .keyserver.upload_forms import UPlainTextForm, UTelegramForm, UKeyserverURLForm, UVCardForm, UPubkeyForm, UIconForm, UHTMLForm
+        from .keyserver.tab_bar import TabWidget
+        from .keyserver.address_list import pick_ks_address
+        from electroncash.keyserver.handler import KSHandler
+        from .keyserver.collapsible_box import CollapsibleBox
+        from datetime import datetime
+
+        # Init handler
+        self.ks_handler = KSHandler()
+
+        # Upload
+        upload_groupbox = CollapsibleBox("Upload")
+        
+        upload_grid = QGridLayout()
+        upload_grid.setSpacing(8)
+        upload_grid.setColumnStretch(3, 1)
+
+        def pick_address_upload():
+            addr = pick_ks_address(self, False)
+            if addr:
+                self.ks_addr_upload_e.setText(addr)
+
+        msg = _('Address to uploaded to.  Use the tool button on the right to pick a wallet address.')
+        description_label = HelpLabel(_('&Address'), msg)
+        upload_grid.addWidget(description_label, 1, 0)
+        self.ks_addr_upload_e = ButtonsLineEdit()
+        self.ks_addr_upload_e.setReadOnly(True)
+        self.ks_addr_upload_e.setPlaceholderText(_("Specify a wallet address"))
+        self.ks_addr_upload_e.addButton(":icons/tab_addresses.png", on_click=pick_address_upload, tooltip=_("Pick an address from your wallet"))
+        description_label.setBuddy(self.ks_addr_upload_e)
+        upload_grid.addWidget(self.ks_addr_upload_e, 1, 1, 1, -1)
+
+        msg = _('Expiry of the metadata.')
+        description_label = HelpLabel(_('&Expiry'), msg)
+        upload_grid.addWidget(description_label, 2, 0)
+        self.ks_expiry_upload_e = QDateTimeEdit()
+        self.ks_expiry_upload_e.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        now = QDateTime.currentDateTime()
+        self.ks_expiry_upload_e.setDateTime(now)
+        tomorrow = now.addDays(1)
+        self.ks_expiry_upload_e.setMinimumDateTime(tomorrow)
+        description_label.setBuddy(self.ks_expiry_upload_e)
+        upload_grid.addWidget(self.ks_expiry_upload_e, 2, 1, 1, -1)
+
+        msg = _('Add new entry to payload.')
+        description_label = HelpLabel(_('&New Entry'), msg)
+        upload_grid.addWidget(description_label, 3, 0)
+        self.ks_combobox_upload = QComboBox(self)
+        self.ks_combobox_upload.addItem("Plain Text")
+        self.ks_combobox_upload.addItem("Telegram")
+        self.ks_combobox_upload.addItem("Keyservers")
+        self.ks_combobox_upload.addItem("vCard")
+        self.ks_combobox_upload.addItem("PubKey")
+        self.ks_combobox_upload.addItem("Icon")
+        self.ks_combobox_upload.addItem("HTML")
+        description_label.setBuddy(self.ks_combobox_upload)
+        upload_grid.addWidget(self.ks_combobox_upload, 3, 1, 1, 1)
+        add_new_entry = QPushButton(_("&Add"))
+        upload_grid.addWidget(add_new_entry, 3, 2, 1, 1)
+        
+        self.u_ks_forms = TabWidget(self)
+        upload_grid.addWidget(self.u_ks_forms, 4, 0, 1, -1)
+
+        def on_text_changed():
+            addr_is_some = bool(self.ks_addr_upload_e.text())
+
+            if not addr_is_some:
+                upload_button.setEnabled(False)
+                return
+            
+            for index in range(self.u_ks_forms.count()):
+                if not self.u_ks_forms.widget(index).is_full():
+                    upload_button.setEnabled(False)
+                    return
+            
+            upload_button.setEnabled(True)
+
+        def add_form():
+            index = self.ks_combobox_upload.currentIndex()
+            if index == 0:
+                form = UPlainTextForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "Plain Text")
+            elif index == 1:
+                form = UTelegramForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "Telegram")
+            elif index == 2:
+                form = UKeyserverURLForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "Keyserver List")
+            elif index == 3:
+                form = UVCardForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "vCard")
+            elif index == 4:
+                form = UPubkeyForm(self)
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "PubKey")
+            elif index == 5:
+                form = UIconForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "Icon")
+            elif index == 6:
+                form = UHTMLForm()
+                form.inputs_changed.connect(on_text_changed)
+                self.u_ks_forms.addTab(form, "HTML")
+
+            new_index = self.u_ks_forms.count() - 1
+            self.u_ks_forms.setCurrentIndex(new_index)
+            upload_groupbox.resize()
+            on_text_changed()
+
+        def remove_forms():
+            self.u_ks_forms.clear()
+            on_text_changed()
+            upload_groupbox.resize()
+        
+        add_new_entry.clicked.connect(add_form)
+        clear_button = QPushButton(_("&Clear Entries"))
+        clear_button.clicked.connect(remove_forms)
+
+        upload_button = EnterButton(_("&Upload"), self.payfor_put)
+        upload_grid.addLayout(Buttons(clear_button, upload_button), 5, 1, 1, 3)
+
+        def on_clear():
+            self.ks_addr_upload_e.clear()
+            index = self.ks_combobox_upload.currentIndex()
+            self.stacked_forms.widget(index).clear()
+
+        self.ks_addr_upload_e.textChanged.connect(on_text_changed)
+        self.ks_expiry_upload_e.dateChanged.connect(on_text_changed)
+        on_text_changed()  # start button off disabled
+
+        upload_groupbox.setContentLayout(upload_grid)
+
+        # Download
+        self.download_groupbox = CollapsibleBox("Download")
+
+        download_grid = QGridLayout()
+        download_grid.setSpacing(8)
+        download_grid.setColumnStretch(3, 1)
+
+        msg = _('Address to downloaded from.  Use the tool button on the right to pick a wallet address.')
+        description_label = HelpLabel(_('&Address'), msg)
+        download_grid.addWidget(description_label, 1, 0)
+        self.ks_addr_download_e = ButtonsLineEdit()
+        self.ks_addr_download_e.setReadOnly(True)
+        self.ks_addr_download_e.setPlaceholderText(_("Specify a wallet address"))
+        self.ks_addr_download_e.addButton(":icons/tab_addresses.png", on_click= lambda: self.pick_address_download(picker=True), tooltip=_("Pick an address from your wallet"))
+        description_label.setBuddy(self.ks_addr_download_e)
+        download_grid.addWidget(self.ks_addr_download_e, 1, 1, 1, -1)
+
+        self.d_ks_forms = TabWidget(self)
+        download_grid.addWidget(self.d_ks_forms, 2, 0, 1, -1)
+
+        self.download_groupbox.setContentLayout(download_grid)
+
+        # Tools
+        tools_groupbox = CollapsibleBox("Tools")
+
+        tool_grid = QGridLayout()
+        tool_grid.setSpacing(8)
+        tool_grid.setColumnStretch(3, 1)
+
+        msg = _('W2W message to be decoded.')
+        description_label = HelpLabel(_('&W2W Message (Base64)'), msg)
+        tool_grid.addWidget(description_label, 0, 0)
+        self.w2w_cipher_text_e = QTextEdit()
+        description_label.setBuddy(self.w2w_cipher_text_e)
+        tool_grid.addWidget(self.w2w_cipher_text_e, 0, 1, 1, -1)
+
+        decrypt = QPushButton(_("&Decrypt"))
+        decrypt.clicked.connect(lambda: self.decrypt_w2w_msg())
+        tool_grid.addLayout(Buttons(decrypt), 1, 1, 1, -1)
+
+        tools_groupbox.setContentLayout(tool_grid)
+
+        # Compose
+        vbox0 = QVBoxLayout()
+        vbox0.addWidget(upload_groupbox)
+        vbox0.addWidget(self.download_groupbox)
+        vbox0.addWidget(tools_groupbox)
+        hbox = QHBoxLayout()
+        hbox.addLayout(vbox0)
+
+        w = QWidget()
+        vbox = QVBoxLayout(w)
+        vbox.addLayout(hbox)
+        vbox.addStretch(1)
+        return w
+
     def remove_address(self, addr):
         if self.question(_("Do you want to remove {} from your wallet?"
                            .format(addr.to_ui_string()))):
@@ -3056,6 +3322,95 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
             text = "\n".join([payto + ", 0" for payto in paytos])
             self.payto_e.setText(text)
             self.payto_e.setFocus()
+
+    @protected
+    def _sign_metadata_digest(self, addr: str, digest: bytes, password: str):
+        addr = Address.from_string(addr)
+        signature = self.wallet.sign_digest(addr, digest, password)
+        public_key = bytes.fromhex(self.wallet.get_public_key(addr))
+        self.print_error(public_key)
+        return public_key, signature
+
+
+    _payforput_popup_kill_tab_changed_connection = None
+    def payfor_put(self):
+        ''' Pay-for-put to keyserver '''
+
+        from electroncash.keyserver.metadata_builder import MetadataBuilder
+
+        addr = str(self.ks_addr_upload_e.text())
+        now = QDateTime.currentDateTime()
+        expiry = self.ks_expiry_upload_e.dateTime()
+        ttl = int(now.secsTo(expiry))
+        ks_url = self.ks_handler.uniform_sample()
+        url = "%s/keys/%s" % (ks_url, addr)
+
+        try:
+            # Construct basic metadata from payload text
+            entries = [self.u_ks_forms.widget(index).construct_entry() for index in range(self.u_ks_forms.count())]
+            builder = MetadataBuilder(addr, ttl, self._sign_metadata_digest)
+            builder.add_entry_batch(entries)
+            metadata = builder.build()
+        except UserCancelled:
+            return
+        except Exception as e:
+            self.print_error("metadata construction error:", repr(e))
+            self.show_error(str(e))
+            return
+
+        if not self.payment_request:
+            if self.gui_object.warn_if_no_network(self):
+                return
+
+        def get_ks_pr():
+            # Runs in thread
+            self.print_error("Keyserver URL", url)
+            pr = paymentrequest.get_ks_payment_request(url)
+            return pr
+
+        def on_success(pr):
+            # Runs in main thread
+            if pr:
+                # Set payment request to handle keyserver PUT
+                pr.set_metadata(metadata) 
+                if pr.error:
+                    # TODO: Fallback to other node?
+                    self.print_error("Keyserver ERROR", pr.error)
+                    self.show_error(_("There was an error interfacing with the keyserver."))
+                    return
+                self.print_error("Keyserver RESULT", repr(pr))
+                self.prepare_for_payment_request_ks()
+                def show_popup():
+                    if not self.send_button.isVisible():
+                        # likely a watching-only wallet, in which case
+                        # showing the popup label for the send button
+                        # leads to unspecified position for the button
+                        return
+                    show_it = partial(
+                                ShowPopupLabel,
+                                text=_("Please review payment before sending to Keyserver"),
+                                target=self.send_button, timeout=15000.0,
+                                name="KeyserverPopup",
+                                pointer_position=PopupWidget.LeftSide,
+                                activation_hides=True, track_target=True,
+                                dark_mode = ColorScheme.dark_scheme
+                    )
+                    if not self._payforput_popup_kill_tab_changed_connection:
+                        # this ensures that if user changes tabs, the popup dies
+                        # ... it is only connected once per instance lifetime
+                        self._payforput_popup_kill_tab_changed_connection = self.tabs.currentChanged.connect(lambda: KillPopupLabel("KeyserverPopup"))
+                    QTimer.singleShot(0, show_it)
+                pr.request_ok_callback = show_popup
+                self.on_pr(pr)
+
+
+        def on_error(exc):
+            self.print_error("Keyserver EXCEPTION", repr(exc))
+            self.on_error(exc)
+
+        WaitingDialog(self.top_level_window(),
+                _("Retrieving Keyserver info, please wait ..."),
+                get_ks_pr, on_success, on_error)
 
     def set_contact(self, label, address):
         if not Address.is_valid(address):

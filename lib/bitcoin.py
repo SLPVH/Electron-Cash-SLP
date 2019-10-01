@@ -686,6 +686,10 @@ class EC_KEY(object):
         assert public_key.verify_digest(signature, msg_hash, sigdecode = ecdsa.util.sigdecode_string)
         return signature
 
+    def sign_digest(self, digest):
+        digest = to_bytes(digest, 'utf8')
+        return self.sign(digest)
+
     def sign_message(self, message, is_compressed):
         message = to_bytes(message, 'utf8')
         signature = self.sign(Hash(msg_magic(message)))
